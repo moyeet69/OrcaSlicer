@@ -142,6 +142,59 @@ SCENARIO("z_hop lifts the nozzle when a lift is requested", "[GCodeWriter]") {
     }
 }
 
+SCENARIO("Z vibration oscillates Z around the layer height while extruding", "[GCodeWriter]") {
+    GIVEN("A writer with 10 Hz, 0.05 mm Z vibration at Z = 1 and a feedrate of 10 mm/s") {
+        PrintConfig config;
+        config.z_vibration_enabled.value   = true;
+        config.z_vibration_frequency.value = 10.;
+        config.z_vibration_amplitude.value = 0.05;
+        GCodeWriter writer;
+        writer.apply_print_config(config);
+        std::vector<unsigned int> extruder_ids { 0 };
+        writer.set_extruders(extruder_ids);
+        writer.set_extruder(0);
+        writer.travel_to_z(1.0);
+        writer.travel_to_xy(Vec2d(0., 0.));
+        writer.set_speed(600.);
+
+        auto z_values = [](const std::string &gcode) {
+            std::vector<double> zs;
+            GCodeReader reader;
+            reader.parse_buffer(gcode, [&zs](GCodeReader &, const GCodeReader::GCodeLine &line) {
+                if (line.has_z()) zs.push_back(line.z());
+            });
+            return zs;
+        };
+
+        WHEN("a 10 mm extrusion is written on a vibrating layer") {
+            writer.set_z_vibration_active(true);
+            const std::string gcode = writer.extrude_to_xy(Vec2d(10., 0.), 1.);
+            const std::vector<double> zs = z_values(gcode);
+            THEN("it is split into 8 segments per cycle over its 1 s duration") {
+                REQUIRE(zs.size() == 80);
+            }
+            THEN("Z swings by the amplitude above and below the layer height") {
+                REQUIRE_THAT(*std::max_element(zs.begin(), zs.end()), Catch::Matchers::WithinAbs(1.05, 1e-6));
+                REQUIRE_THAT(*std::min_element(zs.begin(), zs.end()), Catch::Matchers::WithinAbs(0.95, 1e-6));
+            }
+            THEN("the writer keeps the nominal Z and the next travel returns to it") {
+                REQUIRE_THAT(writer.get_position().z(), Catch::Matchers::WithinAbs(1.0, 1e-9));
+                const std::vector<double> travel_z = z_values(writer.travel_to_xy(Vec2d(20., 0.)));
+                REQUIRE(travel_z.size() == 1);
+                REQUIRE_THAT(travel_z.front(), Catch::Matchers::WithinAbs(1.0, 1e-6));
+            }
+        }
+        WHEN("the layer is not vibrating") {
+            writer.set_z_vibration_active(false);
+            const std::string gcode = writer.extrude_to_xy(Vec2d(10., 0.), 1.);
+            THEN("a single XY move is written") {
+                REQUIRE(z_values(gcode).empty());
+                REQUIRE(std::count(gcode.begin(), gcode.end(), '\n') == 1);
+            }
+        }
+    }
+}
+
 SCENARIO("Origin manipulation", "[GCodeWriter]") {
 	Slic3r::GCode gcodegen;
 	WHEN("set_origin to (10,0)") {

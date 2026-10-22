@@ -444,9 +444,10 @@ protected:
     virtual void on_set_origin(const PrintObject *obj, const Point &inst_shift) {}
     // Arc fitting is suppressed whenever the writer's machine mapping cannot
     // represent a G2/G3 arc. Belt printers get this through BeltKinematics
-    // rather than through an override of their own.
+    // rather than through an override of their own. Z vibration needs linear
+    // moves too, since it adds a Z component to every extrusion segment.
     virtual bool should_disable_arc_fitting() const
-        { return ! m_writer.kinematics().supports_arc_moves(); }
+        { return ! m_writer.kinematics().supports_arc_moves() || m_writer.z_vibration_active(); }
 
     void            _do_export(Print &print, GCodeOutputStream &file, ThumbnailsGeneratorCallback thumbnail_cb);
 

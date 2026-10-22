@@ -282,6 +282,10 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
         "max_travel_detour_distance",
         "printable_area",
         "thumbnail_size",
+        "z_vibration_enabled",
+        "z_vibration_frequency",
+        "z_vibration_amplitude",
+        "z_vibration_start_layer",
         "before_layer_change_gcode",
         "enable_pressure_advance",
         "pressure_advance",
@@ -2322,6 +2326,23 @@ StringObjectException Print::validate(std::vector<StringObjectException> *warnin
                 return {L("Spiral (vase) mode does not work when an object contains more than one material."), nullptr, "spiral_mode"};
             }
         }
+    }
+
+    if (m_config.z_vibration_enabled && !m_config.spiral_mode) {
+        const double amplitude = m_config.z_vibration_amplitude.value;
+        for (const PrintObject *object : m_objects)
+            if (amplitude >= object->config().layer_height.value)
+                return {L("Z vibration amplitude must be smaller than the layer height, otherwise the nozzle hits the previous layer."), object, "z_vibration_amplitude"};
+        // Peak Z speed and acceleration of the sine wave, checked against the normal-mode machine limits.
+        const double omega       = 2. * PI * m_config.z_vibration_frequency.value;
+        const double max_speed_z = m_config.machine_max_speed_z.values.empty() ? 0. : m_config.machine_max_speed_z.values.front();
+        const double max_accel_z = m_config.machine_max_acceleration_z.values.empty() ? 0. : m_config.machine_max_acceleration_z.values.front();
+        if (max_speed_z > 0. && omega * amplitude > max_speed_z)
+            // TRN %1% is the Z speed the vibration needs, %2% the printer's maximum Z speed, both in mm/s.
+            warn((boost::format(L("Z vibration needs a Z speed of %1$.1f mm/s but the printer's maximum is %2$.1f mm/s, so the vibration will be slower than set.")) % (omega * amplitude) % max_speed_z).str(), "z_vibration_frequency");
+        if (max_accel_z > 0. && omega * omega * amplitude > max_accel_z)
+            // TRN %1% is the Z acceleration the vibration needs, %2% the printer's maximum Z acceleration, both in mm/s².
+            warn((boost::format(L("Z vibration needs a Z acceleration of %1$.0f mm/s² but the printer's maximum is %2$.0f mm/s², so the vibration will be weaker and slower than set.")) % (omega * omega * amplitude) % max_accel_z).str(), "z_vibration_frequency");
     }
 
     // Cache of layer height profiles for checking:

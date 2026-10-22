@@ -6879,6 +6879,39 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloatOrPercent(200, true));
 
+    def = this->add("z_vibration_enabled", coBool);
+    def->label = L("Z vibration");
+    def->tooltip = L("Oscillate the Z axis up and down in a sine wave while extruding, so the bed (or nozzle) vibrates at the set frequency. "
+                     "Extrusion moves are split into short segments, so the G-code file gets larger. "
+                     "Not available in spiral vase mode. Arc fitting is skipped on vibrating layers.");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("z_vibration_frequency", coFloat);
+    def->label = L("Frequency");
+    def->tooltip = L("Number of up and down cycles per second. The achievable frequency is limited by the Z axis speed and acceleration of the printer.");
+    def->sidetext = L("Hz");
+    def->min = 0.1;
+    def->max = 200;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(10));
+
+    def = this->add("z_vibration_amplitude", coFloat);
+    def->label = L("Amplitude");
+    def->tooltip = L("Distance the Z axis moves above and below the layer height. Must be smaller than the layer height, otherwise the nozzle hits the previous layer.");
+    def->sidetext = L("mm");
+    def->min = 0;
+    def->max = 1;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(0.02));
+
+    def = this->add("z_vibration_start_layer", coInt);
+    def->label = L("Start layer");
+    def->tooltip = L("First layer that vibrates. Layer 1 is the first layer; starting later keeps the first layer flat for bed adhesion.");
+    def->min = 1;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionInt(2));
+
     def = this->add("spiral_starting_flow_ratio", coFloat);
     def->label = L("Spiral starting flow ratio");
     // xgettext:no-c-format, no-boost-format

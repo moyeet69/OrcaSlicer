@@ -6610,6 +6610,8 @@ LayerResult GCode::process_layer(
     //interface layer id is 0.
     bool                 first_layer   = (layer.id() == 0 && abs(layer.bottom_z()) < EPSILON);
     m_writer.set_is_first_layer(first_layer);
+    // Orca: z_vibration_start_layer is 1-based, layer.id() is 0-based.
+    m_writer.set_z_vibration_active(int(layer.id()) + 1 >= print.config().z_vibration_start_layer.value);
     unsigned int         first_extruder_id = layer_tools.extruders.front();
 
     // Initialize config with the 1st object to be printed at this layer.

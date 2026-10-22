@@ -161,6 +161,9 @@ public:
     void set_is_bbl_machine(bool bval) {m_is_bbl_printers = bval;}
     const bool is_bbl_printers() const {return m_is_bbl_printers;}
     void set_is_first_layer(bool bval) { m_is_first_layer = bval; }
+    // Orca: Z vibration oscillates Z in a sine wave during extrusions on the layers where it is active.
+    void set_z_vibration_active(bool active) { m_z_vibration_active = active && m_z_vibration_frequency > 0. && m_z_vibration_amplitude > 0.; }
+    bool z_vibration_active() const { return m_z_vibration_active; }
     GCodeFlavor get_gcode_flavor() const { return config.gcode_flavor; }
     void invalidate_acceleration() { m_last_acceleration = 0; m_last_travel_acceleration = 0; }
     void invalidate_jerk() { m_last_jerk = 0; }
@@ -204,6 +207,15 @@ protected:
     double          m_current_speed;
 
     std::string _travel_to_z(double z, const std::string &comment);
+
+    // Orca: Z vibration state. m_pos.z() stays at the nominal layer Z; m_z_vibration_offset is how far the
+    // last emitted move was from it, so the next travel can bring Z back.
+    bool   m_z_vibration_active    = false;
+    double m_z_vibration_frequency = 0.;
+    double m_z_vibration_amplitude = 0.;
+    double m_z_vibration_phase     = 0.; // seconds into the current cycle
+    double m_z_vibration_offset    = 0.;
+    void   extrude_to_xy_with_z_vibration(std::string &out, const Vec2d &point, double dE, const std::string &comment);
 
     // Whether a destination gets first-layer treatment.  With a point test
     // installed it decides; otherwise the layer-coarse m_is_first_layer flag does.

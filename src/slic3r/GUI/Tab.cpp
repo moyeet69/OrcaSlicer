@@ -3299,6 +3299,12 @@ void TabPrint::build()
         optgroup->append_single_option_line("timelapse_type", "others_settings_special_mode#timelapse");
         optgroup->append_single_option_line("enable_wrapping_detection", "others_settings_special_mode#enable-clumping-detection");
 
+        optgroup = page->new_optgroup(L("Z vibration"), L"param_special");
+        optgroup->append_single_option_line("z_vibration_enabled");
+        optgroup->append_single_option_line("z_vibration_frequency");
+        optgroup->append_single_option_line("z_vibration_amplitude");
+        optgroup->append_single_option_line("z_vibration_start_layer");
+
         optgroup = page->new_optgroup(L("Fuzzy skin"), L"fuzzy_skin");
         optgroup->append_single_option_line("fuzzy_skin", "others_settings_fuzzy_skin#fuzzy-skin-mode");
         optgroup->append_single_option_line("fuzzy_skin_mode", "others_settings_fuzzy_skin#fuzzy-skin-generator-mode");

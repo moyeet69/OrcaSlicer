@@ -106,6 +106,10 @@ void GCodeWriter::apply_print_config(const PrintConfig &print_config)
 {
     this->config.apply(print_config, true);
 
+    const bool z_vibration = print_config.z_vibration_enabled.value && !print_config.spiral_mode.value;
+    m_z_vibration_frequency = z_vibration ? print_config.z_vibration_frequency.value : 0.;
+    m_z_vibration_amplitude = z_vibration ? print_config.z_vibration_amplitude.value : 0.;
+
     // Some machine limits are stride-2 (normal, silent) pairs, here we extract the value that will be used,
     // which is always normal mode at the moment
     // TODO: support silent? Any printer actually have that?
@@ -884,6 +888,9 @@ std::string GCodeWriter::travel_to_xy(const Vec2d &point, const std::string &com
         // Axis remap may couple XY with Z; emit full XYZ in machine coordinates.
         Vec3d machine = apply_axis_remap(Vec3d(point_on_plate.x(), point_on_plate.y(), m_pos.z()));
         w.emit_xyz(machine);
+    } else if (m_z_vibration_offset != 0.) {
+        // Return to the nominal Z left by a vibrating extrusion.
+        w.emit_xyz(Vec3d(point_on_plate.x(), point_on_plate.y(), m_pos.z()));
     } else {
         w.emit_xy(point_on_plate);
     }
@@ -892,6 +899,7 @@ std::string GCodeWriter::travel_to_xy(const Vec2d &point, const std::string &com
     w.emit_f(speed * 60.0);
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
+    m_z_vibration_offset = 0.;
     return w.string();
 }
 
@@ -1090,6 +1098,7 @@ std::string GCodeWriter::travel_to_xyz(const Vec3d &point, const std::string &co
             }
         }
         m_pos = dest_point;
+        m_z_vibration_offset = 0.;
         this->set_current_position_clear(true);
         return slop_move + xy_z_move;
     }
@@ -1136,6 +1145,7 @@ std::string GCodeWriter::travel_to_xyz(const Vec3d &point, const std::string &co
     }
 
     m_pos = dest_point;
+    m_z_vibration_offset = 0.;
     this->set_current_position_clear(true);
     return out_string;
 }
@@ -1175,6 +1185,7 @@ std::string GCodeWriter::travel_to_z(double z, const std::string &comment, bool 
 std::string GCodeWriter::_travel_to_z(double z, const std::string &comment)
 {
     m_pos(2) = z;
+    m_z_vibration_offset = 0.;
 
     double speed = this->config.travel_speed_z.get_at(m_cached_extruder_idx);
     if (speed == 0.) {
@@ -1301,6 +1312,10 @@ std::string GCodeWriter::extrude_to_xy(const Vec2d &point, double dE, const std:
 
 void GCodeWriter::extrude_to_xy(std::string &out, const Vec2d &point, double dE, const std::string &comment, bool force_no_extrusion)
 {
+    if (m_z_vibration_active && !force_no_extrusion && dE > 0.) {
+        this->extrude_to_xy_with_z_vibration(out, point, dE, comment);
+        return;
+    }
     m_pos(0) = point(0);
     m_pos(1) = point(1);
     if(std::abs(dE) <= std::numeric_limits<double>::epsilon())
@@ -1324,6 +1339,37 @@ void GCodeWriter::extrude_to_xy(std::string &out, const Vec2d &point, double dE,
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
     w.append_to(out);
+}
+
+// Orca: split the extrusion into segments of equal duration, each ending at
+// Z = nominal Z + amplitude * sin(2 * pi * frequency * t). The duration is
+// estimated from the current feedrate; acceleration is ignored.
+void GCodeWriter::extrude_to_xy_with_z_vibration(std::string &out, const Vec2d &point, double dE, const std::string &comment)
+{
+    // Segments per vibration cycle: enough for a recognisable sine wave without flooding the planner.
+    static constexpr double samples_per_cycle = 8.;
+    const Vec2d  start    = Vec2d(m_pos.x(), m_pos.y());
+    const double duration = (point - start).norm() / (m_current_speed / 60.);
+    const int    segments = std::max(1, int(std::ceil(duration * m_z_vibration_frequency * samples_per_cycle)));
+    const double period   = 1. / m_z_vibration_frequency;
+
+    for (int i = 1; i <= segments; ++ i) {
+        const Vec2d p = (i == segments) ? point : Vec2d(start + (point - start) * (double(i) / double(segments)));
+        m_z_vibration_phase  = std::fmod(m_z_vibration_phase + duration / double(segments), period);
+        m_z_vibration_offset = m_z_vibration_amplitude * std::sin(2. * PI * m_z_vibration_phase / period);
+        filament()->extrude(dE / double(segments));
+
+        //BBS: take plate offset into consider
+        const Vec3d point_on_plate = { p.x() - m_x_offset, p.y() - m_y_offset, m_pos.z() + m_z_vibration_offset };
+        GCodeG1Formatter w;
+        w.emit_xyz(has_axis_remap() ? apply_axis_remap(point_on_plate) : point_on_plate);
+        w.emit_e(filament()->E());
+        if (i == segments)
+            w.emit_comment(GCodeWriter::full_gcode_comment, comment);
+        w.append_to(out);
+    }
+    m_pos(0) = point(0);
+    m_pos(1) = point(1);
 }
 
 // Approximate an arc with linear extrusions, for machine mappings that cannot
@@ -1420,7 +1466,8 @@ void GCodeWriter::extrude_to_xyz(std::string &out, const Vec3d &point, double dE
     // Check if Z actually changes (at export precision) before emitting it.
     // ZAA sloped extrusions call this for every segment, but many consecutive
     // segments share the same quantized Z — emitting it every time is redundant.
-    bool z_changed = (GCodeG1Formatter::quantize_xyzf(point(2)) != GCodeG1Formatter::quantize_xyzf(m_pos(2)));
+    bool z_changed = (GCodeG1Formatter::quantize_xyzf(point(2)) != GCodeG1Formatter::quantize_xyzf(m_pos(2))) || m_z_vibration_offset != 0.;
+    m_z_vibration_offset = 0.;
 
     m_pos = point;
     m_lifted = 0;
